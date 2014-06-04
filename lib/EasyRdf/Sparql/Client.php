@@ -53,6 +53,9 @@ class EasyRdf_Sparql_Client
     /** Configuration settings */
     private $config = array();
 
+    /** The HTTP client */
+    protected $client;
+
 
     /** Create a new SPARQL endpoint client
      *
@@ -70,6 +73,8 @@ class EasyRdf_Sparql_Client
         } else {
             $this->updateUri = $queryUri;
         }
+        $this->client = EasyRdf_Http::getDefaultHttpClient();
+
     }
 
     /** Get the URI of the SPARQL query endpoint
@@ -108,11 +113,62 @@ class EasyRdf_Sparql_Client
      * of type EasyRdf_Graph.
      *
      * @param string $query The query string to be executed
+     * @param string $method The HTTP method to use (GET or POST)
+     * @param headers array Extra headers to send with the HTTP request
      * @return object EasyRdf_Sparql_Result|EasyRdf_Graph Result of the query.
      */
-    public function query($query)
+    public function query($query, $method = 'POST', array $headers = array())
     {
-        return $this->request('query', $query);
+        // Check for undefined prefixes
+        $prefixes = '';
+        foreach (EasyRdf_Namespace::namespaces() as $prefix => $uri) {
+            if (strpos($query, "$prefix:") !== false and
+            strpos($query, "PREFIX $prefix:") === false) {
+                $prefixes .=  "PREFIX $prefix: <$uri>\n";
+            }
+        }
+
+        $this->client->resetParameters();
+
+        $this->client->setUri($this->queryUri);
+
+        // Set a default Content-Type header for POST requests.
+        if ($method == 'POST') {
+            $headers += array(
+                'Content-Type' => 'application/x-www-form-urlencoded',
+            );
+        }
+
+        if ($method == 'GET' || ($method == 'POST' &&
+            $headers['Content-Type'] == 'application/x-www-form-urlencoded')) {
+
+            $encodedQuery = urlencode($prefixes . $query);
+
+            if ($method == 'GET') {
+                // The query string needs to be less than 2kB long.
+                // 2040 = 2kB, minus 7 for '?query=' and 1 for NULL-terminated string on server
+                if (strlen($encodedQuery) + strlen($this->queryUri) <= 2040) {
+                    $this->client->setParameterGet('query', $encodedQuery);
+                } else {
+                    // Fall back to POST instead (which is un-cacheable)
+                    $method = 'POST';
+                }
+            }
+
+            if ($method == 'POST') {
+                $this->client->setRawData($encodedQuery);
+            }
+
+        } else {
+
+            $this->client->setRawData($prefixes . $query);
+
+        }
+
+        foreach ($headers as $name => $value) {
+            $this->client->setHeaders($name, $value);
+        }
+        return $this->request($method);
     }
 
     /** Count the number of triples in a SPARQL 1.1 endpoint
@@ -171,7 +227,11 @@ class EasyRdf_Sparql_Client
      */
     public function update($query)
     {
-        return $this->request('update', $query);
+        $this->client->resetParameters()
+            ->setUri($this->updateUri)
+            ->setRawData($prefixes . $query)
+            ->setHeaders('Content-Type', 'application/sparql-update');
+        return $this->request('POST');
     }
 
     public function insert($data, $graphUri = null)
@@ -222,19 +282,8 @@ class EasyRdf_Sparql_Client
      *
      * @ignore
      */
-    protected function request($type, $query)
+    protected function request($method)
     {
-        // Check for undefined prefixes
-        $prefixes = '';
-        foreach (EasyRdf_Namespace::namespaces() as $prefix => $uri) {
-            if (strpos($query, "$prefix:") !== false and
-                strpos($query, "PREFIX $prefix:") === false) {
-                $prefixes .=  "PREFIX $prefix: <$uri>\n";
-            }
-        }
-
-        $client = EasyRdf_Http::getDefaultHttpClient();
-        $client->resetParameters();
 
         // Tell the server which response formats we can parse
         $accept = EasyRdf_Format::getHttpAcceptHeader(
@@ -243,30 +292,11 @@ class EasyRdf_Sparql_Client
               'application/sparql-results+xml' => 0.8
             )
         );
-        $client->setHeaders('Accept', $accept);
+        $this->client->setHeaders('Accept', $accept);
 
-        if ($type == 'update') {
-            $client->setMethod('POST');
-            $client->setUri($this->updateUri);
-            $client->setRawData($prefixes . $query);
-            $client->setHeaders('Content-Type', 'application/sparql-update');
-        } elseif ($type == 'query') {
-            // Use GET if the query is less than 2kB
-            // 2046 = 2kB minus 1 for '?' and 1 for NULL-terminated string on server
-            $encodedQuery = 'query='.urlencode($prefixes . $query);
-            if (strlen($encodedQuery) + strlen($this->queryUri) <= 2046) {
-                $client->setMethod('GET');
-                $client->setUri($this->queryUri.'?'.$encodedQuery);
-            } else {
-                // Fall back to POST instead (which is un-cacheable)
-                $client->setMethod('POST');
-                $client->setUri($this->queryUri);
-                $client->setRawData($encodedQuery);
-                $client->setHeaders('Content-Type', 'application/x-www-form-urlencoded');
-            }
-        }
+        $this->client->setMethod($method);
 
-        $response = $client->request();
+        $response = $this->client->request();
         if ($response->getStatus() == 204) {
             // No content
             return $response;
