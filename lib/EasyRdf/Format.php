@@ -76,6 +76,35 @@ class EasyRdf_Format
         return self::$formats;
     }
 
+    /** Merge and sort two arrays in descending numerical order.
+     *
+     * Where elements from two arrays have the same numerical value,
+     * all elements with that value from $a will appear before
+     * all elements with that value from $b in the result.
+     *
+     * @return array          A single sorted array
+     */
+    public static function mergeHeaders($a = array(), $b = array())
+    {
+        $result = array();
+        arsort($a, SORT_NUMERIC);
+        arsort($b, SORT_NUMERIC);
+        while (!empty($a) || !empty($b)) {
+            if (empty($a)) {
+                $result[key($b)] = array_shift($b);
+            } elseif (empty($b)) {
+                $result[key($a)] = array_shift($a);
+            } else {
+                if (current($a) < current($b)) {
+                    $result[key($b)] = array_shift($b);
+                } else {
+                    $result[key($a)] = array_shift($a);
+                }
+            }
+        }
+        return $result;
+    }
+
     /** Generates an HTTP Accept header string
      *
      * The string will contain all of the MIME Types that we
@@ -100,26 +129,7 @@ class EasyRdf_Format
 
         // Merge the existing and $extraTypes, giving extraTypes priority
         // when the quality factor (q) is equal.
-        $merge_function = function(array $a = array(), array $b = array()) {
-            $result = array();
-            arsort($a, SORT_NUMERIC);
-            arsort($b, SORT_NUMERIC);
-            while(!empty($a) || !empty($b)) {
-                if (empty($a)) {
-                    $result[key($b)] = array_shift($b);
-                } elseif (empty($b)) {
-                    $result[key($a)] = array_shift($a);
-                } else {
-                    if (current($a) < current($b)) {
-                        $result[key($b)] = array_shift($b);
-                    } else {
-                        $result[key($a)] = array_shift($a);
-                    }
-                }
-            }
-            return $result;
-        };
-        $accept = $merge_function($extraTypes, $accept);
+        $accept = self::mergeHeaders($extraTypes, $accept);
 
         $acceptStr='';
         foreach ($accept as $type => $q) {

@@ -117,6 +117,28 @@ class EasyRdf_FormatTest extends EasyRdf_TestCase
         $this->assertContains('extra/header;q=0.5', $accept);
     }
 
+    public function testMergeHeaders()
+    {
+        $extraTypes = array(
+            'application/sparql-results+json' => 1.0,
+            'application/sparql-results+xml' => 0.8
+        );
+        $accept = array(
+            'application/n-triples' => 1.0,
+            'application/n3' => 0.9,
+            'application/rdf+xml' => 0.8
+        );
+        $merged = EasyRdf_Format::mergeHeaders($extraTypes, $accept);
+        $expected_result = array(
+            'application/sparql-results+json' => 1.0,
+            'application/n-triples' => 1.0,
+            'application/n3' => 0.9,
+            'application/sparql-results+xml' => 0.8,
+            'application/rdf+xml' => 0.8
+        );
+        $this->assertEquals($merged, $expected_result);
+    }
+
     public function testFormatExistsTrue()
     {
         $this->assertTrue(EasyRdf_Format::formatExists('my'));
